@@ -184,6 +184,11 @@ static int jh7110_voutcrg_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_exit;
 
+
+	ret = clk_bulk_prepare_enable(top->top_clks_num, top->top_clks);
+        if (ret)
+		goto err_exit;
+
 	return 0;
 
 err_exit:
