@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/console.h>
+#include <linux/mm.h>
 
 #include <drm/clients/drm_client_setup.h>
 #include <drm/drm_atomic_helper.h>
@@ -32,14 +33,50 @@
 #define DRIVER_MAJOR	1
 #define DRIVER_MINOR	0
 
+static int vs_drm_gem_dma_object_mmap(struct drm_gem_object *obj,
+                                  struct vm_area_struct *vma)
+{
+    vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+    vm_flags_set(vma, VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP);
+
+    return drm_gem_dma_object_mmap(obj, vma);
+}
+
+static const struct drm_gem_object_funcs vs_gem_dma_obj_funcs = {
+        .free         = drm_gem_dma_object_free,
+	.print_info   = drm_gem_dma_object_print_info,
+        .get_sg_table = drm_gem_dma_object_get_sg_table,
+        .vmap         = drm_gem_dma_object_vmap,
+        .mmap         = vs_drm_gem_dma_object_mmap,
+        .vm_ops       = &drm_gem_dma_vm_ops,
+};
+
 static int vs_gem_dumb_create(struct drm_file *file_priv,
 			      struct drm_device *drm,
 			      struct drm_mode_create_dumb *args)
 {
+        struct drm_gem_dma_object *dma_obj;
+        size_t size;
+        int ret;
+
 	/* The hardware wants 128B-aligned pitches for linear buffers. */
 	args->pitch = ALIGN(DIV_ROUND_UP(args->width * args->bpp, 8), 128);
 
-	return drm_gem_dma_dumb_create_internal(file_priv, drm, args);
+	//return drm_gem_dma_dumb_create_internal(file_priv, drm, args);
+
+        size = (size_t)args->pitch * args->height;
+        size = PAGE_ALIGN(size);
+
+        dma_obj = drm_gem_dma_create(drm, size);
+        if (IS_ERR(dma_obj))
+                return PTR_ERR(dma_obj);
+
+        dma_obj->base.funcs = &vs_gem_dma_obj_funcs;
+
+        ret = drm_gem_handle_create(file_priv, &dma_obj->base, &args->handle);
+        drm_gem_object_put(&dma_obj->base);
+
+        return ret;
 }
 
 DEFINE_DRM_GEM_FOPS(vs_drm_driver_fops);
